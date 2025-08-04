@@ -1,3 +1,3 @@
-## Maximum likelihood approach to estimate mediated causal effect
+# (I-)LiMA: robust inference of molecular mediation from summary statistics
 
-Naive MR+MVMR approach, LiMA and I-LiMA.
+To be added.
