@@ -1,0 +1,24 @@
+name: environment
+channels:
+  - conda-forge
+  - bioconda
+  - default
+dependencies:
+  - r-base=4.2.3
+  - r-tidyverse
+  - r-data.table
+  - r-argparse
+  - r-openxlsx
+  - r-gridExtra
+  - r-mvtnorm
+  - r-matrixcalc
+  - r-remotes # To download TwoSampleMR from GitHub
+  - r-gmp # Dependency for TwoSampleMR
+  - r-lme4 # Dependency for TwoSampleMR
+  - unzip # To unzip dependencies in the Dockerfile
+
+# Include the following on arm64 Mac:
+# - r-glmnet
+# - r-RcppArmadillo
+# Also run the following in the terminal before installing TwoSampleMR in R:
+# export PKG_CPPFLAGS="-DHAVE_WORKING_LOG1P" (https://github.com/conda-forge/r-base-feedstock/issues/163)
