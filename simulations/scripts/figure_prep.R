@@ -871,10 +871,11 @@ calculate_metrics_sup <- function(dat) {
                   power_total = mean(!between(0, total - 1.96*SE_total, total + 1.96*SE_total)),
                   power_MP = mean(!between(0, MP - 1.96*SE_MP, MP + 1.96*SE_MP)),
                   not_converged = mean(convergence != 0 | optim_value > 9.99e+307),
-                  sigmag2_not_converged = mean(k_selected > 1 & sigmag2_convergence != 0),
-                  sigmad2_not_converged = mean(k_selected > 1 & sigmad2_convergence != 0),
-                  sigmag2_on_the_bound = mean(k_selected > 1 & abs(sigmag2 - 1e-8) < 1e-8),
-                  sigmad2_on_the_bound = mean(k_selected > 1 & abs(sigmad2 - 1e-8) < 1e-8),
+                  sigmag2_not_converged = sum(k_selected > 1 & sigmag2_convergence != 0) / sum(k_selected > 1),
+                  sigmad2_not_converged = sum(k_selected > 1 & sigmad2_convergence != 0) / sum(k_selected > 1),
+                  sigmag2_on_the_bound = sum(k_selected > 1 & abs(sigmag2 - 1e-8) < 1e-8) / sum(k_selected > 1),
+                  sigmad2_on_the_bound = sum(k_selected > 1 & abs(sigmad2 - 1e-8) < 1e-8) / sum(k_selected > 1),
+                  SE_MP_NaN = mean(is.nan(SE_MP)),
                   # SE_Bias = summary(lm(alpha ~ 0 + total))$coef[1, 2],
                   # bias_MP_CI_lower = ((slope - 1.96*SE_Bias) - unique(1 - p_direct)) / unique(1 - p_direct),
                   # bias_MP_CI_upper = ((slope + 1.96*SE_Bias) - unique(1 - p_direct)) / unique(1 - p_direct),
@@ -891,7 +892,7 @@ calculate_metrics_sup <- function(dat) {
                                                                            coverage_alpha, coverage_total, coverage_MP, 
                                                                            power_alpha, power_total, power_MP, 
                                                                            not_converged, sigmag2_not_converged, sigmad2_not_converged, 
-                                                                           sigmag2_on_the_bound, sigmad2_on_the_bound), names_glue = "{method}_{.value}")
+                                                                           sigmag2_on_the_bound, sigmad2_on_the_bound, SE_MP_NaN), names_glue = "{method}_{.value}")
     
     return(dat_metrics)
 }
@@ -1059,7 +1060,7 @@ dat_k <- mutate(dat[purpose == "k",], purpose_plotmath = "k", x = k, default = (
 dat_k_sig_perc <- mutate(dat[purpose == "k-sig-perc",], purpose_plotmath = "p[k]", x = k_sig_perc, default = (x == 0.05), range = (x %in% c(0.01, 0.03, 0.05, 0.1)))
 dat_total_causal <- mutate(dat[purpose == "total-causal",], purpose_plotmath = "E(theta)", x = total_causal, default = (x == 0.15), range = (x %in% c(0.05, 0.1, 0.15, 0.2)))
 dat_p_indirect <- mutate(dat[purpose == "p-direct",], purpose_plotmath = "MP", x = 1 - p_direct, default = (p_direct == 0.85), range = (p_direct %in% c(0.8, 0.85, 0.9, 0.95)))
-dat_T1E <- mutate(dat[purpose == "T1E",], purpose_plotmath = "T1E", x = k, default = (x == 1), range = (x %in% c(1, 5, 10, 25)))
+dat_T1E <- mutate(dat[purpose == "T1E",], purpose_plotmath = "T1E", x = k, default = (x == 10), range = (x %in% c(1, 5, 10, 25)))
 dat_Truth <- mutate(dat[purpose == "Truth",], purpose_plotmath = "Tru", x = k, default = (x == 10), range = (x %in% c(1, 5, 10, 25)))
 
 dat_not_filtered <- rbind(dat_nX, dat_nZ, dat_nY, dat_m, dat_h2X, dat_k, dat_k_sig_perc, dat_p_value_mediators, dat_cor_mediated, dat_var_explained_ZtoY, dat_total_causal, dat_p_indirect, dat_T1E, dat_Truth) %>%
@@ -1073,9 +1074,11 @@ dat_not_filtered <- rbind(dat_nX, dat_nZ, dat_nY, dat_m, dat_h2X, dat_k, dat_k_s
            x = factor(x, levels = unique(x)))
 
 # We'll filter out results where the optimization didn't converge
-dat_filtered <- filter(dat_not_filtered, convergence == 0 | method %in% c("naive", "naive_zero", "Burgess"),
+dat_filtered <- filter(dat_not_filtered, 
+                       convergence == 0 | method %in% c("naive", "naive_zero", "Burgess"),
                        sigmag2_convergence %in% c(0, NA),
-                       sigmad2_convergence %in% c(0, NA))
+                       sigmad2_convergence %in% c(0, NA),
+                       !is.nan(SE_MP))
 
 ##### Main figures: biases using the regression approach
 dat_regression <- group_by(dat_filtered, scenario, purpose, purpose_plotmath, x, default, range, method, pleiotropy, m, nX, nZ, nY, h2X, total_causal, p_direct, cor_mediated, 
@@ -1269,8 +1272,8 @@ gg_Zhu(dat_regression, dat_filtered, methods, "identity", pleiotropy, colors, 0.
 ##### Data for the supplementary tables
 methods <- c("naive", "original", "integrated_fixed_contained")
 
-create_dat_metrics <- function(dat_filtered, param = NULL, total_filter = 0) {
-    dat_supp <- dat_filtered %>%
+create_dat_metrics <- function(dat, param = NULL, total_filter = 0) {
+    dat_supp <- dat %>%
         filter(method %in% methods, 
                scenario == "Colaus-pleiotropy", 
                pleiotropy == TRUE, 
@@ -1294,9 +1297,9 @@ create_dat_metrics <- function(dat_filtered, param = NULL, total_filter = 0) {
         mutate(purpose = ifelse(duplicated(purpose), "", as.character(purpose)))
     
     if (is.null(param))
-        dat_metrics <- select(dat_metrics, purpose, x, ends_with(c("converged", "bound")))
+        dat_metrics <- select(dat_metrics, purpose, x, ends_with(c("converged", "bound", "NaN")))
     else {
-        dat_metrics <- select(dat_metrics, purpose, x, contains(param)) %>%
+        dat_metrics <- select(dat_metrics, purpose, x, contains(param) & !contains("NaN")) %>%
             select(!ends_with(paste0("bias_", param))) %>%
             rename_with(~ sub(paste0("_", param), "", .x), contains(param))
     }
@@ -1306,7 +1309,7 @@ create_dat_metrics <- function(dat_filtered, param = NULL, total_filter = 0) {
 
 stylize_gtab <- function(gtab, nrow) {
     gtab_styled <- gtab %>%
-        fmt_percent(columns = contains(c("coverage", "power", "prc", "converged", "bound")), decimals = 1, drop_trailing_zeros = TRUE) %>%
+        fmt_percent(columns = contains(c("coverage", "power", "prc", "converged", "bound", "NaN")), decimals = 1, drop_trailing_zeros = TRUE) %>%
         fmt_number(columns = contains("variance"), n_sigfig = 1, drop_trailing_zeros = TRUE) %>%
         cols_width(starts_with(c("naive", "original", "integrated")) ~ px(63),
                    x ~ px(90),
@@ -1418,26 +1421,30 @@ gtab_metrics <- create_metrics_table(dat_metrics, variance_level = 0.005)
 
 ##### Supplementary table about the failures
 gtab_failures <- create_dat_metrics(dat_not_filtered) %>%
-    select(purpose, x, original_not_converged, contains("integrated") & ends_with(c("bound", "converged"))) %>%
+    select(purpose, x, original_not_converged, contains("integrated") & ends_with(c("bound", "converged")), original_SE_MP_NaN, contains("integrated") & ends_with(c("NaN"))) %>%
     gt() %>%
     cols_label(purpose = "",
                x = "",
                ends_with("not_converged") ~ "f",
                contains("sigmag2") ~ gt::html("&sigma;<sup style='font-size:65%;'>2</sup><sub style='position:relative; font-size:65%; left:-.5em;'>&gamma;</sub>"),
-               contains("sigmad2") ~ gt::html("&sigma;<sup style='font-size:65%;'>2</sup><sub style='position:relative; font-size:65%; left:-.5em;'>&delta;</sub>")) %>%
+               contains("sigmad2") ~ gt::html("&sigma;<sup style='font-size:65%;'>2</sup><sub style='position:relative; font-size:65%; left:-.5em;'>&delta;</sub>"),
+               ends_with("NaN") ~ gt::html("&sigma;<sup style='font-size:65%;'>2</sup><sub style='position:relative; font-size:65%; left:-.5em;'>MP</sub>")) %>%
     tab_spanner(label = gt::html("I-LiMA"), id = "integrated_converged", columns = contains("integrated") & contains("converged")) %>%
     tab_spanner(label = gt::html("I-LiMA"), id = "integrated_bound", columns = contains("integrated") & contains("bound")) %>%
-    tab_spanner(label = gt::html("LiMA"), columns = original_not_converged) %>%
+    tab_spanner(label = gt::html("I-LiMA"), id = "integrated_NaN", columns = contains("integrated") & contains("NaN")) %>%
+    tab_spanner(label = gt::html("LiMA"), id = "original_converged", columns = original_not_converged) %>%
+    tab_spanner(label = gt::html("LiMA"), id = "original_NaN", columns = original_SE_MP_NaN) %>%
     tab_spanner(label = gt::html("<span style='font-size:14pt; font-weight:bold;'>Not converged</span>"), columns = contains("converged")) %>%
-    tab_spanner(label = gt::html("<span style='font-size:14pt; font-weight:bold;'>On the bound</span>"), columns = contains("bound")) %>%
+    tab_spanner(label = gt::html("<span style='font-size:14pt; font-weight:bold;'>On bound</span>"), columns = contains("bound")) %>%
+    tab_spanner(label = gt::html("<span style='font-size:14pt; font-weight:bold;'>Undefined</span>"), columns = contains("NaN")) %>%
     tab_style(locations = cells_body(), style = cell_borders(weight = 0)) %>%
-    tab_style(locations = cells_body(columns = c(x, original_not_converged)), style = cell_borders(sides = "right", weight = px(2))) %>%
-    tab_style(locations = cells_body(columns = contains("integrated") & contains("sigmad2_not_converged")), style = cell_borders(sides = "right", weight = px(2))) %>%
-    tab_style(locations = cells_body(columns = contains("integrated") & contains("sigmad2_not_converged")), style = cell_borders(sides = "right", weight = px(7), style = "double")) %>%
-    data_color(columns = contains(c("converged", "bound")), fn = scales::col_numeric(colorRampPalette(c("white", brewer.pal(n = 3, name = "Reds")))(1000), domain = c(0, 1), na.color = "#f1f1f1")) %>%
+    tab_style(locations = cells_body(columns = c(x, original_not_converged, original_SE_MP_NaN)), style = cell_borders(sides = "right", weight = px(2))) %>%
+    tab_style(locations = cells_body(columns = contains("integrated") & contains("sigmad2")), style = cell_borders(sides = "right", weight = px(2))) %>%
+    tab_style(locations = cells_body(columns = contains("integrated") & contains("sigmad2")), style = cell_borders(sides = "right", weight = px(7), style = "double")) %>%
+    data_color(columns = contains(c("converged", "bound", "NaN")), fn = scales::col_numeric(colorRampPalette(c("white", brewer.pal(n = 3, name = "Reds")))(1000), domain = c(0, 1), na.color = "#f1f1f1")) %>%
     stylize_gtab(nrow = nrow(dat_metrics)-1)
 print(gtab_failures)
-#gtsave(gtab_failures, filename = "failures.png", path = "/Users/kaidolepik/Desktop/Work/PROJECTS_CH/ML_mediated/simulations/figures/paper", vwidth = 1554, vheight = 3855, zoom = 3)
+#gtsave(gtab_failures, filename = "failures.png", path = "/Users/kaidolepik/Desktop/Work/PROJECTS_CH/ML_mediated/simulations/figures/paper", vwidth = 1932, vheight = 3792, zoom = 3)
 
 
 ##### Supplementary table about the distribution of mediator QTLs
@@ -1459,3 +1466,86 @@ gtab <- gt(dat_eqtls) %>%
                 data_row.padding = 6)
 print(gtab)
 #gtsave(gtab, filename = "mediator_QTLs.png", path = "/Users/kaidolepik/Desktop/Work/PROJECTS_CH/ML_mediated/simulations/figures/paper", zoom = 6)
+
+
+##### Supplementary figure about T1E vs power
+FONT_FAMILY <- "Helvetica"
+PLOT_TAG_SIZE <- 20
+AXIS_TITLE_SIZE <- 16
+AXIS_TEXT_SIZE <- 14
+
+methods <- c("integrated_fixed_contained", "original", "naive")
+scenario <- "Colaus-pleiotropy"
+pleiotropy <- TRUE
+colors <- c("#9C9C9C", "#E6A83A", "#D45626")
+
+gg_T1E_vs_power <- function(dat_T1E_vs_power, colors) {
+    gg_T1E <- ggplot(filter(dat_T1E_vs_power, purpose == "T1E"), aes(x = P_MP, y = F0t, color = method_label_succinct)) +
+        geom_abline(slope = 1, linewidth = 0.5, alpha = 0.5) +
+        geom_vline(xintercept = 0.05, linewidth = 0.5, alpha = 0.5) +
+        geom_line(linewidth = 1) +
+        scale_y_continuous(TeX("$F_{H_0}(p)$"), breaks = c(0, 0.2, 0.5, 1), labels = c("0", "0.2", "0.5", "1")) +
+        scale_x_continuous(TeX("$p$"), breaks = c(0, 0.05, 0.2, 0.5, 1), labels = c("0", "     0.05", "0.2", "0.5", "1")) +
+        scale_color_manual(values = colors) +
+        labs(tag = "a") +
+        theme_classic() +
+        theme(legend.position = "none",
+              plot.tag = element_text(family = FONT_FAMILY, face = "bold", size = PLOT_TAG_SIZE),
+              panel.grid.major = element_line(linewidth = 0.2),
+              panel.spacing = unit(0.6, "cm"),
+              axis.title = element_text(size = AXIS_TITLE_SIZE, family = FONT_FAMILY),
+              axis.text = element_text(size = AXIS_TEXT_SIZE, family = FONT_FAMILY))
+    
+    gg_power <- ggplot(filter(dat_T1E_vs_power, purpose != "T1E"), aes(x = P_MP, y = F1t, color = method_label_succinct)) +
+        geom_hline(yintercept = 0.8, linewidth = 0.5, alpha = 0.5) +
+        geom_line(linewidth = 1) +
+        scale_y_continuous(TeX("$F_{H_1}(p)$"), breaks = c(0, 0.5, 0.8, 1), labels = c("0", "0.5", "0.8", "1")) +
+        scale_x_continuous(TeX("$p$"), breaks = c(0, 0.05, 0.5, 0.8, 1), labels = c("0", "     0.05", "0.5", "0.8", "1")) +
+        scale_color_manual(values = colors) +
+        labs(tag = "b") +
+        theme_classic() +
+        theme(legend.position = "none",
+              plot.tag = element_text(family = FONT_FAMILY, face = "bold", size = PLOT_TAG_SIZE),
+              panel.grid.major = element_line(linewidth = 0.2),
+              panel.spacing = unit(0.6, "cm"),
+              axis.title = element_text(size = AXIS_TITLE_SIZE, family = FONT_FAMILY),
+              axis.text = element_text(size = AXIS_TEXT_SIZE, family = FONT_FAMILY))
+    
+    gg_discrimination <- ggplot(dat_T1E_vs_power, aes(x = F0t, y = F1t, color = method_label_succinct)) +
+        geom_abline(slope = 1, linewidth = 0.5, alpha = 0.5, linetype = "dashed") +
+        geom_line(linewidth = 1) +
+        scale_y_continuous(TeX("$F_{H_1}(p)$"), breaks = c(0, 0.2, 0.5, 1), labels = c("0", "0.2", "0.5", "1")) +
+        scale_x_continuous(TeX("$F_{H_0}(p)$"), breaks = c(0, 0.2, 0.5, 1), labels = c("0", "0.2", "0.5", "1")) +
+        scale_color_manual(values = colors) +
+        labs(tag = "c") +
+        theme_classic() +
+        theme(legend.position = "none",
+              plot.tag = element_text(family = FONT_FAMILY, face = "bold", size = PLOT_TAG_SIZE),
+              panel.grid.major = element_line(linewidth = 0.2),
+              panel.spacing = unit(0.6, "cm"),
+              axis.title = element_text(size = AXIS_TITLE_SIZE, family = FONT_FAMILY),
+              axis.text = element_text(size = AXIS_TEXT_SIZE, family = FONT_FAMILY))
+    
+    gg_legend <- gg_legend_Figs(dat_T1E_vs_power, colors)
+    
+    gg <- gg_legend /
+        (gg_T1E + gg_power + gg_discrimination) +
+        plot_layout(heights = c(1, 4))
+    
+    return(gg)
+}
+
+dat_T1E_vs_power <- dat_filtered %>%
+    filter(method %in% methods,
+           scenario == !!scenario,
+           pleiotropy == !!pleiotropy,
+           purpose != "Truth",
+           default) %>%
+    arrange(P_MP) %>%
+    select(method_label_succinct, purpose, P_MP) %>%
+    group_by(method_label_succinct) %>%
+    mutate(F1t = cumsum(ifelse(purpose != "T1E", 1/sum(purpose != "T1E"), 0)),
+           F0t = cumsum(ifelse(purpose == "T1E", 1/sum(purpose == "T1E"), 0)))
+
+gg_T1E_vs_power(dat_T1E_vs_power, colors)
+#ggsave("/Users/kaidolepik/Desktop/Work/PROJECTS_CH/ML_mediated/simulations/figures/paper/T1E_vs_power.pdf", width = 16, height = 6)
